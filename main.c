@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define INST0(_name) (instruction_t) { .type = INSTRUCTION_TYPE_##_name }
+#define INST1(_name, _op0) (instruction_t) { .type = INSTRUCTION_TYPE_##_name, .operand_0 = _op0 }
+#define INST2(_name, _op0, _op1) (instruction_t) { .type = INSTRUCTION_TYPE_##_name, .operand_0 = _op0, .operand_1 = _op1 }
+#define INST3(_name, _op0, _op1, _op2) (instruction_t) { .type = INSTRUCTION_TYPE_##_name, .operand_0 = _op0, .operand_1 = _op1, .operand_2 = _op2 }
+
 static constexpr uint64_t AVM_MEMORY_SIZE = 1024;
 static constexpr uint8_t AVM_REGISTER_SIZE = 16;
 
@@ -118,7 +123,7 @@ static void avm_run(avm_t* avm)
                 avm->pip += 1;
                 break;
             case INSTRUCTION_TYPE_STORE:
-                avm->memory[avm->registers[operand_0]] = avm->registers[operand_1];
+                avm->memory[avm->registers[operand_1]] = avm->registers[operand_0];
                 avm->pip += 1;
                 break;
             case INSTRUCTION_TYPE_MOVE:
@@ -154,104 +159,6 @@ static void avm_run(avm_t* avm)
     }
 }
 
-static instruction_t instruction_push(const int64_t target, const int64_t value)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_PUSH,
-        .operand_0 = target,
-        .operand_1 = value,
-    };
-}
-
-static instruction_t instruction_load(const int64_t address, const int64_t reg)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_LOAD,
-        .operand_0 = address,
-        .operand_1 = reg,
-    };
-}
-
-static instruction_t instruction_store(const int64_t target, const int64_t address)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_STORE,
-        .operand_0 = target,
-        .operand_1 = address,
-    };
-}
-
-static instruction_t instruction_move(const int64_t target, const int64_t value)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_MOVE,
-        .operand_0 = target,
-        .operand_1 = value,
-    };
-}
-
-static instruction_t instruction_add(const int64_t target, const int64_t left, const int64_t right)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_ADD,
-        .operand_0 = target,
-        .operand_1 = left,
-        .operand_2 = right,
-    };
-}
-
-static instruction_t instruction_equ(const int64_t target, const int64_t left, const int64_t right)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_EQU,
-        .operand_0 = target,
-        .operand_1 = left,
-        .operand_2 = right,
-    };
-}
-
-static instruction_t instruction_neq(const int64_t target, const int64_t left, const int64_t right)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_NEQ,
-        .operand_0 = target,
-        .operand_1 = left,
-        .operand_2 = right,
-    };
-}
-
-static instruction_t instruction_print(const int64_t target)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_PRINT,
-        .operand_0 = target,
-    };
-}
-
-static instruction_t instruction_halt()
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_HALT,
-    };
-}
-
-static instruction_t instruction_jump(const int64_t address)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_JUMP,
-        .operand_0 = address,
-    };
-}
-
-static instruction_t instruction_jump_if(const int64_t reg, const int64_t address)
-{
-    return (instruction_t){
-        .type = INSTRUCTION_TYPE_JUMP_IF,
-        .operand_0 = reg,
-        .operand_1 = address,
-    };
-}
-
 int main()
 {
     avm_t avm = {0};
@@ -263,15 +170,15 @@ int main()
     avm.memory[ADDRESS] = 0;
 
     instruction_t program[] = {
-        instruction_load(0, ADDRESS),
-        instruction_push(1, 1),
-        instruction_push(2, 10),
-        instruction_add(3, 0, 1),
-        instruction_store(ADDRESS, 3),
-        instruction_neq(4, 0, 2),
-        instruction_print(3),
-        instruction_jump_if(4, 0),
-        instruction_halt(),
+        INST2(LOAD, 0, ADDRESS),
+        INST2(PUSH, 1, 1),
+        INST2(PUSH, 2, 10),
+        INST3(ADD, 3, 0, 1),
+        INST2(STORE, 3, ADDRESS),
+        INST3(NEQ, 4, 0, 2),
+        INST1(PRINT, 3),
+        INST2(JUMP_IF, 4, 0),
+        INST0(HALT),
     };
 
     avm.program = program;
