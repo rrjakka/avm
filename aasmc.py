@@ -9,4 +9,7 @@ op = 0
 bytes = []
 
 for line in file_lines:
-    if (line == "push")
+    if (line == "push"):
+        ...
+
+# блять

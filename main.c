@@ -19,6 +19,7 @@ typedef enum : uint8_t
     RESULT_INVALID_REGISTER_ACCESS,
     RESULT_INVALID_MEMORY_ACCESS,
     RESULT_INVALID_INSTRUCTION_ACCESS,
+    RESULT_INVALID_SHIFT_OFFSET,
 } result_t;
 
 typedef enum : uint8_t
@@ -70,13 +71,35 @@ typedef struct
 typedef struct
 {
     int64_t memory[AVM_MEMORY_SIZE];
-
     int64_t registers[AVM_REGISTER_SIZE];
     instruction_t* program;
     uint64_t program_size;
-    uint64_t pip; // program instruction pointer
+    uint64_t pip;
     bool halt;
-} avm_t; // arctic virtual machine
+} avm_t;
+
+static bool target_ok(const int64_t target, const uint32_t size) { return 0 <= target && (uint64_t)target < size; }
+
+static bool register_ok(const int64_t _register) { return target_ok(_register, AVM_REGISTER_SIZE); }
+
+static bool memory_ok(const int64_t address) { return target_ok(address, AVM_MEMORY_SIZE); }
+
+static const char* result_to_cstr(const result_t result)
+{
+    switch (result)
+    {
+        case RESULT_OK: return "RESULT_OK";
+        case RESULT_DIVISION_BY_ZERO: return "RESULT_DIVISION_BY_ZERO";
+        case RESULT_INVALID_INSTRUCTION: return "RESULT_INVALID_INSTRUCTION";
+        case RESULT_INVALID_REGISTER: return "RESULT_INVALID_REGISTER";
+        case RESULT_INVALID_REGISTER_ACCESS: return "RESULT_INVALID_REGISTER_ACCESS";
+        case RESULT_INVALID_MEMORY_ACCESS: return "RESULT_INVALID_MEMORY_ACCESS";
+        case RESULT_INVALID_INSTRUCTION_ACCESS: return "RESULT_INVALID_INSTRUCTION_ACCESS";
+        case RESULT_INVALID_SHIFT_OFFSET: return "RESULT_INVALID_SHIFT_OFFSET";
+    }
+
+    return "RESULT_UNKNOWN";
+}
 
 static result_t avm_binary_op(avm_t* avm)
 {
@@ -86,9 +109,9 @@ static result_t avm_binary_op(avm_t* avm)
     const int64_t operand_1 = instruction->operand_1;
     const int64_t operand_2 = instruction->operand_2;
 
-    if (0 > operand_0 || operand_0 >= AVM_REGISTER_SIZE ||
-        0 > operand_1 || operand_1 >= AVM_REGISTER_SIZE ||
-        0 > operand_2 || operand_2 >= AVM_REGISTER_SIZE)
+    if (!register_ok(operand_0) ||
+        !register_ok(operand_1) ||
+        !register_ok(operand_2))
         return RESULT_INVALID_REGISTER_ACCESS;
 
     const int64_t left = avm->registers[operand_1];
@@ -141,10 +164,12 @@ static result_t avm_binary_op(avm_t* avm)
             avm->registers[operand_0] = left ^ right;
             break;
         case INSTRUCTION_TYPE_SHL:
-            avm->registers[operand_0] = left << right;
+            if (0 > right || right >= 64) return RESULT_INVALID_SHIFT_OFFSET;
+            avm->registers[operand_0] = (int64_t)((uint64_t)left << right);
             break;
         case INSTRUCTION_TYPE_SHR:
-            avm->registers[operand_0] = left >> right;
+            if (0 > right || right >= 64) return RESULT_INVALID_SHIFT_OFFSET;
+            avm->registers[operand_0] = (int64_t)((uint64_t)left >> right);
             break;
         default:
             return RESULT_INVALID_INSTRUCTION;
@@ -164,30 +189,25 @@ static result_t avm_instruction_execute(avm_t* avm)
             avm->pip += 1;
             return RESULT_OK;
         case INSTRUCTION_TYPE_SET:
-            if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
-                return RESULT_INVALID_REGISTER_ACCESS;
+            if (!register_ok(instruction->operand_0)) return RESULT_INVALID_REGISTER_ACCESS;
             avm->registers[instruction->operand_0] = instruction->operand_1;
             avm->pip += 1;
             return RESULT_OK;
         case INSTRUCTION_TYPE_LOAD:
-            if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
-                return RESULT_INVALID_REGISTER_ACCESS;
-            if (0 > instruction->operand_1 || instruction->operand_1 >= AVM_MEMORY_SIZE)
-                return RESULT_INVALID_MEMORY_ACCESS;
+            if (!register_ok(instruction->operand_0)) return RESULT_INVALID_REGISTER_ACCESS;
+            if (!memory_ok(instruction->operand_1)) return RESULT_INVALID_MEMORY_ACCESS;
             avm->registers[instruction->operand_0] = avm->memory[instruction->operand_1];
             avm->pip += 1;
             return RESULT_OK;
         case INSTRUCTION_TYPE_STORE:
-            if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
-                return RESULT_INVALID_REGISTER_ACCESS;
-            if (0 > instruction->operand_1 || instruction->operand_1 >= AVM_MEMORY_SIZE)
-                return RESULT_INVALID_MEMORY_ACCESS;
+            if (!register_ok(instruction->operand_0)) return RESULT_INVALID_REGISTER_ACCESS;
+            if (!memory_ok(instruction->operand_1)) return RESULT_INVALID_MEMORY_ACCESS;
             avm->memory[instruction->operand_1] = avm->registers[instruction->operand_0];
             avm->pip += 1;
             return RESULT_OK;
         case INSTRUCTION_TYPE_MOVE:
-            if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE ||
-                0 > instruction->operand_1 || instruction->operand_1 >= AVM_REGISTER_SIZE)
+            if (!register_ok(instruction->operand_0) ||
+                !register_ok(instruction->operand_1))
                 return RESULT_INVALID_REGISTER_ACCESS;
             avm->registers[instruction->operand_0] = avm->registers[instruction->operand_1];
             avm->pip += 1;
@@ -210,13 +230,14 @@ static result_t avm_instruction_execute(avm_t* avm)
         case INSTRUCTION_TYPE_SHR:
             return avm_binary_op(avm);
         case INSTRUCTION_TYPE_NOT:
-            if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
+            if (!register_ok(instruction->operand_0) ||
+                !register_ok(instruction->operand_1))
                 return RESULT_INVALID_REGISTER_ACCESS;
             avm->registers[instruction->operand_0] = ~avm->registers[instruction->operand_1];
+            avm->pip += 1;
             return RESULT_OK;
         case INSTRUCTION_TYPE_PRINT:
-            if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
-                return RESULT_INVALID_REGISTER_ACCESS;
+            if (!register_ok(instruction->operand_0)) return RESULT_INVALID_REGISTER_ACCESS;
             printf("%" PRIi64 "\n", avm->registers[instruction->operand_0]);
             avm->pip += 1;
             return RESULT_OK;
@@ -224,16 +245,16 @@ static result_t avm_instruction_execute(avm_t* avm)
             avm->halt = true;
             return RESULT_OK;
         case INSTRUCTION_TYPE_JUMP:
-            if (0 > instruction->operand_0 || instruction->operand_0 >= avm->program_size)
+            if (!target_ok(instruction->operand_0, avm->program_size))
                 return RESULT_INVALID_INSTRUCTION_ACCESS;
             avm->pip = instruction->operand_0;
             return RESULT_OK;
         case INSTRUCTION_TYPE_JUMP_IF:
-            if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
+            if (!register_ok(instruction->operand_0))
                 return RESULT_INVALID_REGISTER_ACCESS;
             if (avm->registers[instruction->operand_0] != 0)
             {
-                if (0 > instruction->operand_0 || instruction->operand_0 >= avm->program_size)
+                if (!target_ok(instruction->operand_1, avm->program_size))
                     return RESULT_INVALID_INSTRUCTION_ACCESS;
                 avm->pip = instruction->operand_1;
                 return RESULT_OK;
@@ -263,17 +284,16 @@ int main()
 {
     avm_t avm = {0};
 
-    avm.halt = false;
-
     /*
-     * push r0 0
-     * push r1 1
-     * push r2 10
+     * set r0 0
+     * set r1 1
+     * set r2 10
      * print r0
      * add r0 r0 r1
      * lth r3 r0 r2
      * jump_if r3 3
      */
+
     instruction_t program[] = {
         INST2(SET, 0, 0),
         INST2(SET, 1, 1),
@@ -288,5 +308,11 @@ int main()
     avm.program = program;
     avm.program_size = sizeof(program) / sizeof(program[0]);
 
-    return avm_run(&avm);
+    const result_t result = avm_run(&avm);
+
+    if (result != RESULT_OK)
+        fprintf(stderr, "%s(%d) at pip=%" PRIu64 "\n",
+            result_to_cstr(result), result, avm.pip);
+
+    return result;
 }
