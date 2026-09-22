@@ -27,7 +27,7 @@ typedef enum : uint8_t
 
     INSTRUCTION_TYPE_MOVE,
 
-    INSTRUCTION_TYPE_PUSH,
+    INSTRUCTION_TYPE_SET,
     INSTRUCTION_TYPE_LOAD,
 
     INSTRUCTION_TYPE_STORE,
@@ -139,7 +139,7 @@ static result_t avm_instruction_execute(avm_t* avm)
         case INSTRUCTION_TYPE_NOP:
             avm->pip += 1;
             return RESULT_OK;
-        case INSTRUCTION_TYPE_PUSH:
+        case INSTRUCTION_TYPE_SET:
             if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
                 return RESULT_INVALID_REGISTER_ACCESS;
             avm->registers[instruction->operand_0] = instruction->operand_1;
@@ -190,6 +190,8 @@ static result_t avm_instruction_execute(avm_t* avm)
             avm->halt = true;
             return RESULT_OK;
         case INSTRUCTION_TYPE_JUMP:
+            if (0 > instruction->operand_0 || instruction->operand_0 > avm->program_size)
+                return RESULT_INVALID_INSTRUCTION_ACCESS;
             avm->pip = instruction->operand_0;
             return RESULT_OK;
         case INSTRUCTION_TYPE_JUMP_IF:
@@ -240,9 +242,9 @@ int main()
      */
 
     instruction_t program[] = {
-        INST2(PUSH, 0, 0),
-        INST2(PUSH, 1, 1),
-        INST2(PUSH, 2, 10),
+        INST2(SET, 0, 0),
+        INST2(SET, 1, 1),
+        INST2(SET, 2, 10),
         INST1(PRINT, 0),
         INST3(ADD, 0, 0, 1),
         INST3(LTH, 3, 0, 2),
