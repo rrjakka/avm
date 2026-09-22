@@ -1,14 +1,12 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
-
-#define INST0(_name) (instruction_t) { .type = INSTRUCTION_TYPE_##_name }
-#define INST1(_name, _op0) (instruction_t) { .type = INSTRUCTION_TYPE_##_name, .operand_0 = _op0 }
-#define INST2(_name, _op0, _op1) (instruction_t) { .type = INSTRUCTION_TYPE_##_name, .operand_0 = _op0, .operand_1 = _op1 }
-#define INST3(_name, _op0, _op1, _op2) (instruction_t) { .type = INSTRUCTION_TYPE_##_name, .operand_0 = _op0, .operand_1 = _op1, .operand_2 = _op2 }
+#include <stdlib.h>
 
 static constexpr uint64_t AVM_MEMORY_SIZE = 1024;
 static constexpr uint8_t AVM_REGISTER_SIZE = 16;
+static constexpr uint64_t AVM_INSTRUCTION_SERIAL_SIZE = 1 + 3 * sizeof(int64_t);
+
 
 typedef enum : uint8_t
 {
@@ -20,6 +18,8 @@ typedef enum : uint8_t
     RESULT_INVALID_MEMORY_ACCESS,
     RESULT_INVALID_INSTRUCTION_ACCESS,
     RESULT_INVALID_SHIFT_OFFSET,
+    RESULT_IO_ERROR,
+    RESULT_INVALID_FILE_FORMAT,
 } result_t;
 
 typedef enum : uint8_t
@@ -62,10 +62,10 @@ typedef enum : uint8_t
 
 typedef struct
 {
-    const instruction_type_t type;
-    const int64_t operand_0;
-    const int64_t operand_1;
-    const int64_t operand_2;
+    instruction_type_t type;
+    int64_t operand_0;
+    int64_t operand_1;
+    int64_t operand_2;
 } instruction_t;
 
 typedef struct
@@ -96,6 +96,8 @@ static const char* result_to_cstr(const result_t result)
         case RESULT_INVALID_MEMORY_ACCESS: return "RESULT_INVALID_MEMORY_ACCESS";
         case RESULT_INVALID_INSTRUCTION_ACCESS: return "RESULT_INVALID_INSTRUCTION_ACCESS";
         case RESULT_INVALID_SHIFT_OFFSET: return "RESULT_INVALID_SHIFT_OFFSET";
+        case RESULT_IO_ERROR: return "RESULT_IO_ERROR";
+        case RESULT_INVALID_FILE_FORMAT: return "RESULT_INVALID_FILE_FORMAT";
     }
 
     return "RESULT_UNKNOWN";
@@ -280,39 +282,124 @@ static result_t avm_run(avm_t* avm)
     return result;
 }
 
+static int64_t avm_read_i64_le(const uint8_t* bytes)
+{
+    uint64_t value = 0;
+
+    for (uint64_t index = 0; index < sizeof(int64_t); index += 1)
+        value |= (uint64_t)bytes[index] << (index * 8);
+
+    return (int64_t)value;
+}
+
+static uint8_t* avm_file_read(const char* path, uint64_t* size)
+{
+    FILE* file = fopen(path, "rb");
+
+    if (file == nullptr)
+        return nullptr;
+
+    if (fseek(file, 0, SEEK_END) != 0)
+    {
+        fclose(file);
+        return nullptr;
+    }
+
+    const long file_size = ftell(file);
+
+    if (file_size < 0)
+    {
+        fclose(file);
+        return nullptr;
+    }
+
+    rewind(file);
+
+    uint8_t* data = malloc((size_t)file_size);
+
+    if (data == nullptr)
+    {
+        fclose(file);
+        return nullptr;
+    }
+
+    if (fread(data, 1, (size_t)file_size, file) != (size_t)file_size)
+    {
+        free(data);
+        fclose(file);
+        return nullptr;
+    }
+
+    fclose(file);
+    *size = (uint64_t)file_size;
+    return data;
+}
+
+static result_t avm_program_load(avm_t* avm, const char* path)
+{
+    uint64_t serial_size = 0;
+
+    uint8_t* serial = avm_file_read(path, &serial_size);
+
+    if (serial == nullptr) return RESULT_IO_ERROR;
+
+    if (serial_size == 0 || serial_size % AVM_INSTRUCTION_SERIAL_SIZE != 0)
+    {
+        free(serial);
+        return RESULT_INVALID_FILE_FORMAT;
+    }
+
+    const uint64_t program_size = serial_size / AVM_INSTRUCTION_SERIAL_SIZE;
+
+    const auto program = (instruction_t*)malloc((size_t)program_size * sizeof(instruction_t));
+
+    if (program == nullptr)
+    {
+        free(serial);
+        return RESULT_IO_ERROR;
+    }
+
+    for (uint64_t index = 0; index < program_size; index += 1)
+    {
+        const uint8_t* record = serial + index * AVM_INSTRUCTION_SERIAL_SIZE;
+
+        if (record[0] > (uint8_t)INSTRUCTION_TYPE_SHR)
+        {
+            free(program);
+            free(serial);
+            return RESULT_INVALID_FILE_FORMAT;
+        }
+
+        program[index] = (instruction_t) {
+            .type = (instruction_type_t)record[0],
+            .operand_0 = avm_read_i64_le(record + 1),
+            .operand_1 = avm_read_i64_le(record + 9),
+            .operand_2 = avm_read_i64_le(record + 17),
+        };
+    }
+
+    free(serial);
+
+    avm->program = program;
+    avm->program_size = program_size;
+
+    return RESULT_OK;
+}
+
 int main()
 {
-    avm_t avm = {0};
+    avm_t avm = {};
 
-    /*
-     * set r0 0
-     * set r1 1
-     * set r2 10
-     * print r0
-     * add r0 r0 r1
-     * lth r3 r0 r2
-     * jump_if r3 3
-     */
+    result_t result = avm_program_load(&avm, "../main.avmb");
 
-    instruction_t program[] = {
-        INST2(SET, 0, 0),
-        INST2(SET, 1, 1),
-        INST2(SET, 2, 10),
-        INST1(PRINT, 0),
-        INST3(ADD, 0, 0, 1),
-        INST3(LTH, 3, 0, 2),
-        INST2(JUMP_IF, 3, 3),
-        INST0(HALT),
-    };
-
-    avm.program = program;
-    avm.program_size = sizeof(program) / sizeof(program[0]);
-
-    const result_t result = avm_run(&avm);
+    if (result == RESULT_OK)
+        result = avm_run(&avm);
 
     if (result != RESULT_OK)
         fprintf(stderr, "%s(%d) at pip=%" PRIu64 "\n",
-            result_to_cstr(result), result, avm.pip);
+                result_to_cstr(result), result, avm.pip);
+
+    free(avm.program);
 
     return result;
 }

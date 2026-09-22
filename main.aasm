@@ -1,7 +1,7 @@
 start:
-    push r0 0
-    push r1 1
-    push r2 10
+    set r0 0
+    set r1 1
+    set r2 10
 loop:
     print r0
     add r0 r0 r1
