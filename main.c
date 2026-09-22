@@ -13,6 +13,7 @@ static constexpr uint8_t AVM_REGISTER_SIZE = 16;
 typedef enum : uint8_t
 {
     RESULT_OK = 0,
+    RESULT_DIVISION_BY_ZERO,
     RESULT_INVALID_INSTRUCTION,
     RESULT_INVALID_REGISTER,
     RESULT_INVALID_REGISTER_ACCESS,
@@ -32,6 +33,11 @@ typedef enum : uint8_t
 
     INSTRUCTION_TYPE_STORE,
 
+    INSTRUCTION_TYPE_PRINT,
+
+    INSTRUCTION_TYPE_JUMP,
+    INSTRUCTION_TYPE_JUMP_IF,
+
     INSTRUCTION_TYPE_ADD,
     INSTRUCTION_TYPE_SUB,
     INSTRUCTION_TYPE_MUL,
@@ -40,17 +46,17 @@ typedef enum : uint8_t
 
     INSTRUCTION_TYPE_EQU,
     INSTRUCTION_TYPE_NEQ,
-
     INSTRUCTION_TYPE_LTH,
     INSTRUCTION_TYPE_GTH,
-
     INSTRUCTION_TYPE_LEQ,
     INSTRUCTION_TYPE_GEQ,
 
-    INSTRUCTION_TYPE_PRINT,
-
-    INSTRUCTION_TYPE_JUMP,
-    INSTRUCTION_TYPE_JUMP_IF,
+    INSTRUCTION_TYPE_AND,
+    INSTRUCTION_TYPE_OR,
+    INSTRUCTION_TYPE_XOR,
+    INSTRUCTION_TYPE_NOT,
+    INSTRUCTION_TYPE_SHL,
+    INSTRUCTION_TYPE_SHR,
 } instruction_type_t;
 
 typedef struct
@@ -80,7 +86,8 @@ static result_t avm_binary_op(avm_t* avm)
     const int64_t operand_1 = instruction->operand_1;
     const int64_t operand_2 = instruction->operand_2;
 
-    if (0 > operand_1 || operand_1 >= AVM_REGISTER_SIZE ||
+    if (0 > operand_0 || operand_0 >= AVM_REGISTER_SIZE ||
+        0 > operand_1 || operand_1 >= AVM_REGISTER_SIZE ||
         0 > operand_2 || operand_2 >= AVM_REGISTER_SIZE)
         return RESULT_INVALID_REGISTER_ACCESS;
 
@@ -99,9 +106,11 @@ static result_t avm_binary_op(avm_t* avm)
             avm->registers[operand_0] = left * right;
             break;
         case INSTRUCTION_TYPE_DIV:
+            if (right == 0) return RESULT_DIVISION_BY_ZERO;
             avm->registers[operand_0] = left / right;
             break;
         case INSTRUCTION_TYPE_MOD:
+            if (right == 0) return RESULT_DIVISION_BY_ZERO;
             avm->registers[operand_0] = left % right;
             break;
         case INSTRUCTION_TYPE_EQU:
@@ -121,6 +130,21 @@ static result_t avm_binary_op(avm_t* avm)
             break;
         case INSTRUCTION_TYPE_GEQ:
             avm->registers[operand_0] = (int64_t)(left >= right);
+            break;
+        case INSTRUCTION_TYPE_AND:
+            avm->registers[operand_0] = left & right;
+            break;
+        case INSTRUCTION_TYPE_OR:
+            avm->registers[operand_0] = left | right;
+            break;
+        case INSTRUCTION_TYPE_XOR:
+            avm->registers[operand_0] = left ^ right;
+            break;
+        case INSTRUCTION_TYPE_SHL:
+            avm->registers[operand_0] = left << right;
+            break;
+        case INSTRUCTION_TYPE_SHR:
+            avm->registers[operand_0] = left >> right;
             break;
         default:
             return RESULT_INVALID_INSTRUCTION;
@@ -179,7 +203,17 @@ static result_t avm_instruction_execute(avm_t* avm)
         case INSTRUCTION_TYPE_GTH:
         case INSTRUCTION_TYPE_GEQ:
         case INSTRUCTION_TYPE_LEQ:
+        case INSTRUCTION_TYPE_AND:
+        case INSTRUCTION_TYPE_OR:
+        case INSTRUCTION_TYPE_XOR:
+        case INSTRUCTION_TYPE_SHL:
+        case INSTRUCTION_TYPE_SHR:
             return avm_binary_op(avm);
+        case INSTRUCTION_TYPE_NOT:
+            if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
+                return RESULT_INVALID_REGISTER_ACCESS;
+            avm->registers[instruction->operand_0] = ~avm->registers[instruction->operand_1];
+            return RESULT_OK;
         case INSTRUCTION_TYPE_PRINT:
             if (0 > instruction->operand_0 || instruction->operand_0 >= AVM_REGISTER_SIZE)
                 return RESULT_INVALID_REGISTER_ACCESS;
@@ -190,7 +224,7 @@ static result_t avm_instruction_execute(avm_t* avm)
             avm->halt = true;
             return RESULT_OK;
         case INSTRUCTION_TYPE_JUMP:
-            if (0 > instruction->operand_0 || instruction->operand_0 > avm->program_size)
+            if (0 > instruction->operand_0 || instruction->operand_0 >= avm->program_size)
                 return RESULT_INVALID_INSTRUCTION_ACCESS;
             avm->pip = instruction->operand_0;
             return RESULT_OK;
@@ -199,7 +233,7 @@ static result_t avm_instruction_execute(avm_t* avm)
                 return RESULT_INVALID_REGISTER_ACCESS;
             if (avm->registers[instruction->operand_0] != 0)
             {
-                if (0 > instruction->operand_0 || instruction->operand_0 > avm->program_size)
+                if (0 > instruction->operand_0 || instruction->operand_0 >= avm->program_size)
                     return RESULT_INVALID_INSTRUCTION_ACCESS;
                 avm->pip = instruction->operand_1;
                 return RESULT_OK;
@@ -240,7 +274,6 @@ int main()
      * lth r3 r0 r2
      * jump_if r3 3
      */
-
     instruction_t program[] = {
         INST2(SET, 0, 0),
         INST2(SET, 1, 1),
